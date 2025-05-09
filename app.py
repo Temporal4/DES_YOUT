@@ -2,6 +2,12 @@ import streamlit as st
 import yt_dlp
 import subprocess
 import os
+import re
+
+# Función para limpiar el título y eliminar caracteres no válidos para los nombres de archivo
+def limpiar_titulo(titulo):
+    # Reemplazar caracteres no válidos en el nombre del archivo
+    return re.sub(r'[<>:"/\\|?*]', '_', titulo)
 
 # Función para descargar MP4
 def descargar_mp4(url, calidad, cookies=None):
@@ -37,8 +43,11 @@ def descargar_mp4(url, calidad, cookies=None):
             info = ydl.extract_info(url, download=True)  # Descargar video
             nombre_original = ydl.prepare_filename(info)  # Obtener el nombre original del archivo
 
+        # Limpiar el título para eliminar caracteres no válidos en el nombre de archivo
+        nombre_limpio = limpiar_titulo(info['title'])
+
         # Definir el nombre del archivo final convertido a H.264
-        nombre_salida = f"{info['title']}.mp4"
+        nombre_salida = f"{nombre_limpio}.mp4"
 
         # Convertir el video descargado a H.264 usando FFmpeg (incluyendo el audio)
         comando_ffmpeg = [
