@@ -4,6 +4,7 @@ import subprocess
 import os
 import tempfile
 import concurrent.futures
+import re
 
 # Guardar archivo de cookies
 def guardar_cookies_archivo(cookies_file):
@@ -38,7 +39,13 @@ def obtener_calidades_disponibles(url, cookies_path=None):
             if height and height >= 480:
                 etiqueta = f"{height}p{fps if fps else ''}"
                 calidades.append((etiqueta, format_id))
-    calidades = sorted(list(set(calidades)), key=lambda x: int(x[0].replace("p", "").replace("60", "").replace("30", "")))
+
+    # Función para extraer la altura desde la etiqueta
+    def extraer_altura(etiqueta_formato):
+        match = re.match(r"(\d+)p", etiqueta_formato[0])
+        return int(match.group(1)) if match else 0
+
+    calidades = sorted(list(set(calidades)), key=extraer_altura)
     return calidades
 
 # Descargar MP4 con calidad específica con barra de progreso
@@ -61,7 +68,7 @@ def descargar_mp4_especifico(url, format_id, cookies_path=None):
             nombre_original = ydl.prepare_filename(info)
         progreso.progress(70, text="⚙️ Convirtiendo video...")
 
-        subprocess.run([
+        subprocess.run([  # Usamos ffmpeg para convertir
             "ffmpeg", "-i", nombre_original,
             "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental",
             "-preset", "ultrafast", "-crf", "24",
