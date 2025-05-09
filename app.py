@@ -3,7 +3,6 @@ import yt_dlp
 import subprocess
 import os
 import tempfile
-import concurrent.futures
 import re
 
 # Guardar archivo de cookies
@@ -40,13 +39,22 @@ def obtener_calidades_disponibles(url, cookies_path=None):
                 etiqueta = f"{height}p{fps if fps else ''}"
                 calidades.append((etiqueta, format_id))
 
-    # Función para extraer la altura desde la etiqueta
-    def extraer_altura(etiqueta_formato):
-        match = re.match(r"(\d+)p", etiqueta_formato[0])
-        return int(match.group(1)) if match else 0
-
-    calidades = sorted(list(set(calidades)), key=extraer_altura)
-    return calidades
+    # Eliminar duplicados y filtrar solo la mejor calidad de 720p
+    calidades = sorted(list(set(calidades)), key=lambda x: int(re.match(r"(\d+)p", x[0]).group(1)))
+    mejor_720p = None
+    calidades_filtradas = []
+    
+    for calidad in calidades:
+        if "720p" in calidad[0]:
+            if mejor_720p is None:
+                mejor_720p = calidad
+        else:
+            calidades_filtradas.append(calidad)
+    
+    if mejor_720p:
+        calidades_filtradas.append(mejor_720p)
+    
+    return calidades_filtradas
 
 # Descargar MP4 con calidad específica con barra de progreso
 def descargar_mp4_especifico(url, format_id, cookies_path=None):
@@ -91,63 +99,6 @@ def descargar_mp4_especifico(url, format_id, cookies_path=None):
     except Exception as e:
         st.error(f"❌ Error al descargar MP4: {e}")
 
-# Descargar MP3 en paralelo con barra de progreso
-def descargar_mp3(links, cookies_path=None):
-    progreso = st.progress(0, text="🔄 Iniciando descargas MP3...")
-    resultados = []
-    total = len(links)
-
-    def descargar_individual(link, index):
-        try:
-            opciones = {
-                'format': 'bestaudio/best',
-                'outtmpl': '%(title)s.%(ext)s',
-                'noplaylist': True,
-                'quiet': True,
-                'no_warnings': True,
-                'retries': 3,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '0',
-                }],
-            }
-            if cookies_path:
-                opciones['cookiefile'] = cookies_path
-
-            with yt_dlp.YoutubeDL(opciones) as ydl:
-                info = ydl.extract_info(link, download=True)
-                nombre = ydl.prepare_filename(info).replace(".webm", ".mp3").replace(".m4a", ".mp3")
-                return nombre
-        except Exception as e:
-            return f"error::{link}::{e}"
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {executor.submit(descargar_individual, link, i): link for i, link in enumerate(links)}
-        completados = 0
-        for future in concurrent.futures.as_completed(futures):
-            resultado = future.result()
-            completados += 1
-            progreso.progress(completados / total, text=f"🔉 Descargando MP3 ({completados}/{total})...")
-            resultados.append(resultado)
-
-    for resultado in resultados:
-        if resultado.startswith("error::"):
-            _, link_fallido, mensaje = resultado.split("::", 2)
-            st.error(f"❌ Error al descargar {link_fallido}: {mensaje}")
-        else:
-            with open(resultado, "rb") as f:
-                st.download_button(
-                    label=f"⬇️ Descargar MP3: {os.path.basename(resultado)}",
-                    data=f,
-                    file_name=os.path.basename(resultado),
-                    mime="audio/mpeg"
-                )
-            os.remove(resultado)
-
-    progreso.progress(1.0, text="✅ Descargas completadas")
-    st.success("🎵 Todos los MP3 fueron descargados exitosamente.")
-
 # Interfaz principal
 def main():
     st.title("Descargador de YouTube: MP4 y MP3")
@@ -164,9 +115,11 @@ def main():
                 return
             calidad_seleccionada = st.selectbox("Selecciona la calidad disponible", [f"{c[0]}" for c in calidades_disponibles])
             format_id_map = {c[0]: c[1] for c in calidades_disponibles}
-            if st.button("Descargar MP4"):
-                format_id = format_id_map.get(calidad_seleccionada)
-                if format_id:
+            if calidad_seleccionada:
+                st.session_state.calidad_seleccionada = calidad_seleccionada
+            if 'calidad_seleccionada' in st.session_state and st.session_state.calidad_seleccionada:
+                format_id = format_id_map.get(st.session_state.calidad_seleccionada)
+                if st.button("Descargar MP4"):
                     descargar_mp4_especifico(url, format_id, cookies_path)
         elif not url:
             st.warning("Por favor ingresa un enlace válido.")
