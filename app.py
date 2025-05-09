@@ -6,7 +6,6 @@ import tempfile
 import concurrent.futures
 
 # Guardar archivo de cookies
-
 def guardar_cookies_archivo(cookies_file):
     if cookies_file is not None:
         temp_dir = tempfile.gettempdir()
@@ -16,22 +15,40 @@ def guardar_cookies_archivo(cookies_file):
         return cookies_path
     return None
 
+# Obtener formatos disponibles
+def obtener_calidades(url, cookies_path=None):
+    try:
+        opciones = {'quiet': True, 'skip_download': True}
+        if cookies_path:
+            opciones['cookiefile'] = cookies_path
+
+        with yt_dlp.YoutubeDL(opciones) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formatos = info.get("formats", [])
+            calidades = {}
+            for f in formatos:
+                if f.get("vcodec") != "none" and f.get("acodec") != "none":
+                    height = f.get("height")
+                    fps = f.get("fps", 30)
+                    label = f"{height}p ({fps}fps)"
+                    if label not in calidades:
+                        calidades[label] = f["format_id"]
+            return calidades
+    except Exception as e:
+        st.error(f"Error al obtener calidades: {e}")
+        return {}
+
 # Descargar video MP4
-def descargar_mp4(url, calidad, cookies_path=None):
+def descargar_mp4(url, format_id, cookies_path=None):
     try:
         archivo_temporal = "temp_video"
         nombre_salida = "video_convertido.mp4"
 
-        if calidad == "alta":
-            opciones = {'format': 'bestvideo+bestaudio/best', 'outtmpl': f'{archivo_temporal}.%(ext)s'}
-        elif calidad == "normal":
-            opciones = {'format': 'bv[height<=480]+ba/b[height<=480]', 'outtmpl': f'{archivo_temporal}.%(ext)s'}
-        elif calidad == "baja":
-            opciones = {'format': 'worstvideo+worstaudio/worst', 'outtmpl': f'{archivo_temporal}.%(ext)s'}
-        else:
-            st.error("Calidad no válida.")
-            return None
-
+        opciones = {
+            'format': format_id,
+            'outtmpl': f'{archivo_temporal}.%(ext)s',
+            'socket_timeout': 30
+        }
         if cookies_path:
             opciones['cookiefile'] = cookies_path
 
@@ -41,10 +58,10 @@ def descargar_mp4(url, calidad, cookies_path=None):
 
         subprocess.run([
             "ffmpeg", "-i", nombre_original,
-            "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental",
-            "-preset", "ultrafast", "-crf", "24",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24",
+            "-c:a", "aac", "-strict", "experimental",
             nombre_salida
-        ])
+        ], check=True)
 
         os.remove(nombre_original)
         st.success("✅ Video descargado y convertido con éxito")
@@ -58,8 +75,12 @@ def descargar_mp4(url, calidad, cookies_path=None):
             )
         os.remove(nombre_salida)
 
+    except subprocess.CalledProcessError:
+        st.error("❌ Error al convertir el video con ffmpeg.")
+    except yt_dlp.utils.DownloadError as e:
+        st.error(f"❌ Error al descargar el video: {e}")
     except Exception as e:
-        st.error(f"Error al descargar MP4: {e}")
+        st.error(f"❌ Error inesperado: {e}")
 
 # Descargar MP3 en paralelo
 def descargar_mp3(links, cookies_path=None):
@@ -120,12 +141,12 @@ def main():
 
     if tipo_archivo == "MP4":
         url = st.text_input("Ingresa el enlace del video (MP4)")
-        calidad = st.selectbox("Selecciona la calidad del video", ["alta", "normal", "baja"])
-        if st.button("Descargar MP4"):
-            if url:
-                descargar_mp4(url, calidad, cookies_path)
-            else:
-                st.warning("Por favor ingresa un enlace válido.")
+        if url and st.button("Ver calidades disponibles"):
+            calidades = obtener_calidades(url, cookies_path)
+            if calidades:
+                calidad_seleccionada = st.selectbox("Selecciona una calidad", list(calidades.keys()))
+                if st.button("Descargar MP4"):
+                    descargar_mp4(url, calidades[calidad_seleccionada], cookies_path)
 
     elif tipo_archivo == "MP3":
         enlaces = st.text_area("Ingresa hasta 10 enlaces (uno por línea)")
