@@ -1,70 +1,103 @@
 import streamlit as st
 import yt_dlp
+import subprocess
 import os
-import shutil
-from pathlib import Path
-import re  # Para eliminar caracteres especiales
 
-# Función para limpiar el nombre del archivo (eliminar caracteres no deseados)
-def limpiar_titulo(titulo):
-    # Eliminar caracteres no válidos en los títulos (como : " * ? / \ |)
-    return re.sub(r'[<>:"/\\|?*]', '', titulo)
+# Función para descargar MP4
+def descargar_mp4(url, calidad, cookies=None):
+    try:
+        # Ruta temporal para descargar el archivo
+        archivo_temporal = "temp_video"
 
-def descargar_videos(links, tipo, calidad, cookies=None):
-    resultados = []
-    temp_dir = Path("temp")
-    temp_dir.mkdir(exist_ok=True)
+        # Opciones de descarga según la calidad seleccionada
+        if calidad == "alta":
+            opciones = {
+                'format': 'bestvideo+bestaudio/best',  # Mejor calidad de video y audio
+                'outtmpl': f'{archivo_temporal}.%(ext)s'  # Guardar como archivo temporal
+            }
+        elif calidad == "normal":
+            opciones = {
+                'format': 'bv[height<=480]+ba/b[height<=480]',  # Calidad estándar (480p o menor)
+                'outtmpl': f'{archivo_temporal}.%(ext)s'  # Guardar como archivo temporal
+            }
+        elif calidad == "baja":
+            opciones = {
+                'format': 'worstvideo+worstaudio/worst',  # Peor calidad posible
+                'outtmpl': f'{archivo_temporal}.%(ext)s'  # Guardar como archivo temporal
+            }
+        else:
+            st.error("Por favor selecciona una opción válida: alta, normal o baja.")
+            return
 
-    # Opciones comunes
-    options = {
-        'outtmpl': str(temp_dir / '%(title)s.%(ext)s'),
-        'noplaylist': True
-    }
+        if cookies:
+            opciones['cookiefile'] = cookies  # Cargar cookies si se proporcionan
 
-    if cookies:
-        options['cookiefile'] = cookies
+        # Descargar el video
+        with yt_dlp.YoutubeDL(opciones) as ydl:
+            info = ydl.extract_info(url, download=True)  # Descargar video
+            nombre_original = ydl.prepare_filename(info)  # Obtener el nombre original del archivo
 
-    if tipo == 'MP3':
-        options.update({
+        # Definir el nombre del archivo final convertido a H.264
+        nombre_salida = f"{info['title']}.mp4"
+
+        # Convertir el video descargado a H.264 usando FFmpeg (incluyendo el audio)
+        comando_ffmpeg = [
+            "ffmpeg",
+            "-i", nombre_original,            # Archivo de entrada
+            "-c:v", "libx264",                # Codificación H.264 para video
+            "-c:a", "aac",                    # Codificación AAC para audio
+            "-strict", "experimental",        # Compatibilidad para formatos más antiguos
+            "-preset", "fast",                # Mejor rendimiento
+            "-crf", "23",                     # Calidad de codificación (ajustable)
+            nombre_salida                     # Archivo de salida
+        ]
+
+        # Ejecutar la conversión
+        subprocess.run(comando_ffmpeg)
+
+        # Eliminar el archivo temporal original
+        os.remove(nombre_original)
+
+        st.success(f"Descarga y conversión completadas. Archivo guardado como: {nombre_salida}")
+    except Exception as e:
+        st.error(f"Error al descargar o convertir el video: {e}")
+
+
+# Función para descargar MP3 (soporte múltiples links)
+def descargar_mp3(links, cookies=None):
+    try:
+        # Opciones de descarga para MP3
+        opciones = {
             'format': 'bestaudio/best',
+            'extractaudio': True,
+            'audioformat': 'mp3',
+            'outtmpl': '%(title)s.%(ext)s',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '0'
-            }]
-        })
-    else:  # MP4
-        if calidad == 'Alta':
-            fmt = 'bestvideo+bestaudio/best'
-        elif calidad == 'Normal':
-            fmt = 'bv[height<=480]+ba/b[height<=480]'
-        else:  # Baja
-            fmt = 'worstvideo+worstaudio/worst'
+                'preferredquality': '0',  # Calidad máxima
+            }],
+        }
 
-        options.update({
-            'format': fmt,
-            'merge_output_format': 'mp4'
-        })
+        if cookies:
+            opciones['cookiefile'] = cookies  # Cargar cookies si se proporcionan
 
-    with yt_dlp.YoutubeDL(options) as ydl:
-        for link in links:
-            try:
-                info = ydl.extract_info(link, download=True)
-                filename = ydl.prepare_filename(info)
-                ext = '.mp3' if tipo == 'MP3' else '.mp4'
-                final_name = limpiar_titulo(info['title']) + ext
-                final_path = temp_dir / final_name
+        # Descargar los audios
+        with yt_dlp.YoutubeDL(opciones) as ydl:
+            ydl.download(links)
 
-                # Convertir a H.264 (si es MP4) para que se pueda escuchar correctamente
-                if tipo == 'MP4' and final_path.exists():
-                    # Usar ffmpeg para convertir el video a H.264
-                    output_path = final_path.with_suffix('.h264.mp4')
-                    os.system(f"ffmpeg -i {final_path} -vcodec libx264 -acodec aac {output_path}")
+        st.success("✅ Descarga completada con éxito 🎵")
+    except Exception as e:
+        st.error(f"Error al descargar los audios: {e}")
 
-                    # Eliminar el archivo original (si la conversión fue exitosa)
-                    if output_path.exists():
-                        os.remove(final_path)
-                        final_path = output_path
-                    else:
-                        resultados.append((f"Error al procesar el archivo: {link}", None))
-                
+
+# Streamlit app interface
+def main():
+    st.title("YouTube Downloader")
+
+    # Selección de tipo de archivo
+    tipo_archivo = st.selectbox("Selecciona el tipo de archivo", ["MP4", "MP3"])
+
+    # Opciones de calidad
+    if tipo_archivo == "MP4":
+        calidad = st.selectbox("Selecciona la
