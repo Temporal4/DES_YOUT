@@ -1,74 +1,93 @@
+# app.py
 import streamlit as st
 import yt_dlp
-import subprocess
 import os
+import shutil
+from pathlib import Path
 
-st.set_page_config(page_title="Descargador YouTube", layout="centered")
+def descargar_videos(links, tipo, calidad, cookies=None):
+    resultados = []
+    temp_dir = Path("temp")
+    temp_dir.mkdir(exist_ok=True)
 
-st.title("📥 Descargador de YouTube (MP3 / MP4)")
-st.write("Selecciona el formato, calidad y pega el link del video de YouTube.")
+    # Opciones comunes
+    options = {
+        'outtmpl': str(temp_dir / '%(title)s.%(ext)s'),
+        'noplaylist': True
+    }
 
-formato = st.selectbox("Formato", ["MP4", "MP3"])
-calidad = st.selectbox("Calidad", ["Alta", "Normal", "Baja"] if formato == "MP4" else ["Mejor calidad disponible"])
-url = st.text_input("🔗 Enlace de YouTube (uno solo por ahora)")
+    if cookies:
+        options['cookiefile'] = cookies
 
-usar_cookies = st.checkbox("¿Usar archivo de cookies (solo para videos con restricción)?")
-cookies_file = None
-if usar_cookies:
-    cookies_file = st.file_uploader("Sube tu archivo cookies.txt", type="txt")
+    if tipo == 'MP3':
+        options.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '0'
+            }]
+        })
+    else:  # MP4
+        if calidad == 'Alta':
+            fmt = 'bestvideo+bestaudio/best'
+        elif calidad == 'Normal':
+            fmt = 'bv[height<=480]+ba/b[height<=480]'
+        else:  # Baja
+            fmt = 'worstvideo+worstaudio/worst'
 
-if st.button("Descargar"):
-    if not url:
-        st.error("Por favor, ingresa un enlace de YouTube.")
+        options.update({
+            'format': fmt,
+            'merge_output_format': 'mp4'
+        })
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        for link in links:
+            try:
+                info = ydl.extract_info(link, download=True)
+                filename = ydl.prepare_filename(info)
+                ext = '.mp3' if tipo == 'MP3' else '.mp4'
+                final_name = info['title'] + ext
+                final_path = temp_dir / final_name
+                if final_path.exists():
+                    resultados.append((final_name, final_path))
+            except Exception as e:
+                resultados.append((f"Error al procesar: {link}", None))
+    return resultados
+
+st.title("Descargador de YouTube: MP3 / MP4")
+
+with st.form("formulario"):
+    tipo = st.radio("Selecciona el formato:", ['MP3', 'MP4'])
+    calidad = None
+    if tipo == 'MP4':
+        calidad = st.selectbox("Selecciona la calidad:", ['Alta', 'Normal', 'Baja'])
+    enlaces = st.text_area("Ingresa uno o varios enlaces de YouTube (1 por línea):")
+    cookies = st.file_uploader("(Opcional) Sube archivo de cookies.txt para videos restringidos")
+    submit = st.form_submit_button("Descargar")
+
+if submit:
+    links = [l.strip() for l in enlaces.strip().splitlines() if l.strip()]
+    if not links:
+        st.warning("Debes ingresar al menos un enlace válido.")
     else:
-        archivo_temp = "temp_file"
-        try:
-            with open("cookies.txt", "wb") as f:
-                if cookies_file:
-                    f.write(cookies_file.getvalue())
+        st.info("Procesando las descargas... espera un momento.")
+        cookie_path = None
+        if cookies:
+            cookie_path = Path("cookies.txt")
+            with open(cookie_path, "wb") as f:
+                f.write(cookies.read())
 
-            if formato == "MP4":
-                if calidad == "Alta":
-                    fmt = 'bestvideo+bestaudio/best'
-                elif calidad == "Normal":
-                    fmt = 'bv[height<=480]+ba/b[height<=480]'
-                else:
-                    fmt = 'worstvideo+worstaudio/worst'
-                opciones = {
-                    'format': fmt,
-                    'outtmpl': f'{archivo_temp}.%(ext)s'
-                }
-            else:  # MP3
-                opciones = {
-                    'format': 'bestaudio/best',
-                    'extractaudio': True,
-                    'audioformat': 'mp3',
-                    'outtmpl': '%(title)s.%(ext)s',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '0',
-                    }],
-                }
+        resultados = descargar_videos(links, tipo, calidad, str(cookie_path) if cookie_path else None)
 
-            if usar_cookies and cookies_file:
-                opciones["cookiefile"] = "cookies.txt"
+        for nombre, ruta in resultados:
+            if ruta and ruta.exists():
+                with open(ruta, "rb") as f:
+                    st.download_button(f"Descargar {nombre}", f, file_name=nombre)
+            else:
+                st.error(nombre)
 
-            with yt_dlp.YoutubeDL(opciones) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if formato == "MP4":
-                    nombre_original = ydl.prepare_filename(info)
-                    salida = f"{info['title']}.mp4"
-                    st.write("Convirtiendo a H.264...")
-                    subprocess.run([
-                        "ffmpeg", "-i", nombre_original,
-                        "-c:v", "libx264", "-c:a", "aac",
-                        "-strict", "experimental", salida
-                    ])
-                    os.remove(nombre_original)
-                    st.success("✅ Video descargado y convertido.")
-                else:
-                    st.success("✅ Audio descargado.")
-
-        except Exception as e:
-            st.error(f"Error: {e}")
+        # Limpiar cookies y archivos temporales
+        if cookie_path and cookie_path.exists():
+            cookie_path.unlink()
+        shutil.rmtree("temp")
