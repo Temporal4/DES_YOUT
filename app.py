@@ -79,9 +79,12 @@ st.title("Descargador de YouTube: MP3 / MP4")
 # Formulario para la selección
 with st.form("formulario"):
     tipo = st.radio("Selecciona el formato:", ['MP3', 'MP4'])
+
+    # Mostrar la opción de calidad solo si se selecciona MP4
     calidad = None
     if tipo == 'MP4':
         calidad = st.selectbox("Selecciona la calidad:", ['Alta', 'Normal', 'Baja'])
+
     enlaces = st.text_area("Ingresa uno o varios enlaces de YouTube (1 por línea):")
     cookies = st.file_uploader("(Opcional) Sube archivo de cookies.txt para videos restringidos")
     submit = st.form_submit_button("Descargar")
@@ -109,6 +112,4 @@ if submit:
                 st.error(nombre)
 
         # Limpiar cookies y archivos temporales
-        if cookie_path and cookie_path.exists():
-            cookie_path.unlink()
-        shutil.rmtree("temp")
+        if cookie_path and cookie_
