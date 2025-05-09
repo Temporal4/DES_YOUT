@@ -42,7 +42,7 @@ def descargar_mp4(url, calidad, cookies_path=None):
         subprocess.run([
             "ffmpeg", "-i", nombre_original,
             "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental",
-            "-preset", "veryfast", "-crf", "24",
+            "-preset", "ultrafast", "-crf", "24",
             nombre_salida
         ])
 
