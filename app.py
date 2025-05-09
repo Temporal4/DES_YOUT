@@ -4,7 +4,7 @@ import subprocess
 import os
 import tempfile
 import concurrent.futures
-import re  # <-- necesario para limpiar nombres
+import re
 
 # Función para limpiar nombres
 def limpiar_nombre(nombre):
@@ -26,21 +26,24 @@ def descargar_mp4(url, calidad, cookies_path=None):
         archivo_temporal = "temp_video"
 
         if calidad == "alta":
-            formato = 'bestvideo+bestaudio/best'
+            formato = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         elif calidad == "normal":
-            formato = 'bv[height<=480]+ba/b[height<=480]'
+            formato = 'bv*[height<=480][ext=mp4]+ba[ext=m4a]/best[height<=480][ext=mp4]/best'
         elif calidad == "baja":
-            formato = 'worstvideo+worstaudio/worst'
+            formato = 'worst[ext=mp4]/worst'
         else:
             st.error("Calidad no válida.")
-            return None
+            return
 
         opciones = {
             'format': formato,
             'outtmpl': f'{archivo_temporal}.%(ext)s',
-            'headers': {
-                'User-Agent': 'Mozilla/5.0'
-            }
+            'merge_output_format': 'mp4',
+            'quiet': False,
+            'noplaylist': True,
+            'retries': 5,
+            'no_warnings': True,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         }
 
         if cookies_path:
@@ -54,15 +57,14 @@ def descargar_mp4(url, calidad, cookies_path=None):
             titulo_video = limpiar_nombre(info.get('title', 'video'))
             nombre_salida = f"{titulo_video}.mp4"
 
-            # Simula progreso
-            for i in range(100):
-                progreso.progress(i + 1)
+        if not os.path.exists(nombre_original) or os.path.getsize(nombre_original) == 0:
+            st.error("⚠️ El archivo descargado está vacío. Verifica el enlace o usa cookies.")
+            return
 
-        # Convertir video con ffmpeg
         subprocess.run([
-            "ffmpeg", "-i", nombre_original,
+            "ffmpeg", "-y", "-i", nombre_original,
             "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental",
-            "-preset", "ultrafast", "-crf", "26",
+            "-preset", "ultrafast", "-crf", "24",
             nombre_salida
         ])
 
@@ -79,7 +81,7 @@ def descargar_mp4(url, calidad, cookies_path=None):
         os.remove(nombre_salida)
 
     except Exception as e:
-        st.error(f"Error al descargar MP4: {e}")
+        st.error(f"❌ Error al descargar MP4: {e}")
 
 # Descargar MP3 con barra de progreso en paralelo
 def descargar_mp3(links, cookies_path=None):
@@ -92,6 +94,7 @@ def descargar_mp3(links, cookies_path=None):
                 'quiet': True,
                 'no_warnings': True,
                 'retries': 3,
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
