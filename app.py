@@ -4,6 +4,11 @@ import subprocess
 import os
 import tempfile
 import concurrent.futures
+import re  # <-- necesario para limpiar nombres
+
+# Función para limpiar nombres
+def limpiar_nombre(nombre):
+    return re.sub(r'[\\/:"*?<>|]+', '_', nombre)
 
 # Guardar archivo de cookies
 def guardar_cookies_archivo(cookies_file):
@@ -19,17 +24,24 @@ def guardar_cookies_archivo(cookies_file):
 def descargar_mp4(url, calidad, cookies_path=None):
     try:
         archivo_temporal = "temp_video"
-        nombre_salida = "video_convertido.mp4"
 
         if calidad == "alta":
-            opciones = {'format': 'bestvideo+bestaudio/best', 'outtmpl': f'{archivo_temporal}.%(ext)s'}
+            formato = 'bestvideo+bestaudio/best'
         elif calidad == "normal":
-            opciones = {'format': 'bv[height<=480]+ba/b[height<=480]', 'outtmpl': f'{archivo_temporal}.%(ext)s'}
+            formato = 'bv[height<=480]+ba/b[height<=480]'
         elif calidad == "baja":
-            opciones = {'format': 'worstvideo+worstaudio/worst', 'outtmpl': f'{archivo_temporal}.%(ext)s'}
+            formato = 'worstvideo+worstaudio/worst'
         else:
             st.error("Calidad no válida.")
             return None
+
+        opciones = {
+            'format': formato,
+            'outtmpl': f'{archivo_temporal}.%(ext)s',
+            'headers': {
+                'User-Agent': 'Mozilla/5.0'
+            }
+        }
 
         if cookies_path:
             opciones['cookiefile'] = cookies_path
@@ -39,8 +51,10 @@ def descargar_mp4(url, calidad, cookies_path=None):
         with yt_dlp.YoutubeDL(opciones) as ydl:
             info = ydl.extract_info(url, download=True)
             nombre_original = ydl.prepare_filename(info)
-            
-            # Actualizamos la barra de progreso durante la descarga
+            titulo_video = limpiar_nombre(info.get('title', 'video'))
+            nombre_salida = f"{titulo_video}.mp4"
+
+            # Simula progreso
             for i in range(100):
                 progreso.progress(i + 1)
 
@@ -48,7 +62,7 @@ def descargar_mp4(url, calidad, cookies_path=None):
         subprocess.run([
             "ffmpeg", "-i", nombre_original,
             "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental",
-            "-preset", "ultrafast", "-crf", "24",
+            "-preset", "ultrafast", "-crf", "26",
             nombre_salida
         ])
 
@@ -89,24 +103,25 @@ def descargar_mp3(links, cookies_path=None):
 
             with yt_dlp.YoutubeDL(opciones) as ydl:
                 info = ydl.extract_info(link, download=True)
-                nombre = ydl.prepare_filename(info).replace(".webm", ".mp3").replace(".m4a", ".mp3")
+                titulo = limpiar_nombre(info.get('title', 'audio'))
+                nombre = f"{titulo}.mp3"
                 return nombre
         except Exception as e:
             return f"error::{link}::{e}"
 
     resultados = []
     progreso = st.progress(0, text="🔄 Iniciando descarga de MP3...")
-    
+
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [executor.submit(descargar_individual, link) for link in links]
         completados = 0
         total = len(futures)
-        
+
         for future in concurrent.futures.as_completed(futures):
             resultados.append(future.result())
             completados += 1
             progreso.progress(completados / total)
-    
+
     for resultado in resultados:
         if resultado.startswith("error::"):
             _, link_fallido, mensaje = resultado.split("::", 2)
