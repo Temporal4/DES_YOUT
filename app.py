@@ -58,4 +58,13 @@ def descargar_videos(links, tipo, calidad, cookies=None):
                 # Convertir a H.264 (si es MP4) para que se pueda escuchar correctamente
                 if tipo == 'MP4' and final_path.exists():
                     # Usar ffmpeg para convertir el video a H.264
-                    output_path = final_path.with_suffix_
+                    output_path = final_path.with_suffix('.h264.mp4')
+                    os.system(f"ffmpeg -i {final_path} -vcodec libx264 -acodec aac {output_path}")
+
+                    # Eliminar el archivo original (si la conversión fue exitosa)
+                    if output_path.exists():
+                        os.remove(final_path)
+                        final_path = output_path
+                    else:
+                        resultados.append((f"Error al procesar el archivo: {link}", None))
+                
