@@ -79,4 +79,5 @@ def descargar_mp4(url, calidad, cookies_path=None):
                 st.error(detectar_causa_error(str(e)))
                 return
             nombre_original = ydl.prepare_filename(info)
-            titulo_video = limpiar_no
+            titulo_video = limpiar_nombre(info.get('title', 'video'))
+
