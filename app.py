@@ -4,7 +4,7 @@ import subprocess
 import os
 import tempfile
 import concurrent.futures
-  # <-- necesario para limpiar nombres
+import re  # <-- necesario para limpiar nombres
 
 # Función para limpiar nombres
 def limpiar_nombre(nombre):
