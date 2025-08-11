@@ -4,18 +4,10 @@ import os
 import tempfile
 import concurrent.futures
 import re
-import signal
 
 # ===== Función para limpiar nombres =====
 def limpiar_nombre(nombre):
     return re.sub(r'[\\/:"*?<>|]+', '_', nombre)
-
-# ===== Timeout seguro =====
-class TimeoutException(Exception): pass
-def timeout_handler(signum, frame):
-    raise TimeoutException()
-
-signal.signal(signal.SIGALRM, timeout_handler)
 
 # ===== Guardar cookies =====
 def guardar_cookies_archivo(cookies_file):
@@ -32,7 +24,6 @@ def descargar_mp4(url, calidad, cookies_path=None):
     try:
         archivo_temporal = "temp_video"
 
-        # Formatos optimizados para evitar errores y bloqueos
         if calidad == "alta":
             formato = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         elif calidad == "normal":
@@ -59,28 +50,32 @@ def descargar_mp4(url, calidad, cookies_path=None):
 
         progreso = st.progress(0, text="⏳ Descargando video...")
 
-        signal.alarm(120)  # Máximo 2 minutos
-        with yt_dlp.YoutubeDL(opciones) as ydl:
-            info = ydl.extract_info(url, download=True)
-            nombre_archivo = ydl.prepare_filename(info)
-            titulo_video = limpiar_nombre(info.get('title', 'video'))
-            nombre_salida = f"{titulo_video}.mp4"
-        signal.alarm(0)
+        def tarea():
+            with yt_dlp.YoutubeDL(opciones) as ydl:
+                info = ydl.extract_info(url, download=True)
+                nombre_archivo = ydl.prepare_filename(info)
+                titulo_video = limpiar_nombre(info.get('title', 'video'))
+                nombre_salida = f"{titulo_video}.mp4"
 
-        # Si no es MP4, convertir
-        if not nombre_archivo.endswith(".mp4"):
-            os.system(f'ffmpeg -i "{nombre_archivo}" -c:v libx264 -c:a aac "{nombre_salida}"')
-            os.remove(nombre_archivo)
-        else:
-            os.rename(nombre_archivo, nombre_salida)
+            if not nombre_archivo.endswith(".mp4"):
+                os.system(f'ffmpeg -i "{nombre_archivo}" -c:v libx264 -c:a aac "{nombre_salida}"')
+                os.remove(nombre_archivo)
+            else:
+                os.rename(nombre_archivo, nombre_salida)
 
-        progreso.progress(100, text="✅ Video listo")
-        with open(nombre_salida, "rb") as f:
-            st.download_button("⬇️ Descargar MP4", f, file_name=nombre_salida, mime="video/mp4")
-        os.remove(nombre_salida)
+            return nombre_salida
 
-    except TimeoutException:
-        st.error("⏳ Tiempo de descarga agotado (puede requerir cookies o estar bloqueado por región).")
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futuro = executor.submit(tarea)
+            try:
+                nombre_final = futuro.result(timeout=120)
+                progreso.progress(100, text="✅ Video listo")
+                with open(nombre_final, "rb") as f:
+                    st.download_button("⬇️ Descargar MP4", f, file_name=nombre_final, mime="video/mp4")
+                os.remove(nombre_final)
+            except concurrent.futures.TimeoutError:
+                st.error("⏳ Tiempo de descarga agotado (puede requerir cookies o estar bloqueado por región).")
+
     except yt_dlp.utils.DownloadError as e:
         if "403" in str(e):
             st.error("❌ Acceso prohibido (puede ser restricción de sesión o cookies).")
@@ -112,14 +107,10 @@ def descargar_mp3(links, cookies_path=None):
             if cookies_path:
                 opciones['cookiefile'] = cookies_path
 
-            signal.alarm(120)  # Máximo 2 minutos por canción
             with yt_dlp.YoutubeDL(opciones) as ydl:
                 info = ydl.extract_info(link, download=True)
                 nombre = limpiar_nombre(info.get('title', 'audio')) + ".mp3"
-            signal.alarm(0)
             return nombre
-        except TimeoutException:
-            return f"error::{link}::Tiempo agotado"
         except Exception as e:
             return f"error::{link}::{e}"
 
