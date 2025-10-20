@@ -1,16 +1,15 @@
-import streamlit as st
 import yt_dlp
+import streamlit as st
 import subprocess
 import os
+import re
 import tempfile
-import concurrent.futures
-import re  # <-- necesario para limpiar nombres
 
-# Función para limpiar nombres
+# 📌 Limpia caracteres no válidos de nombres
 def limpiar_nombre(nombre):
     return re.sub(r'[\\/:"*?<>|]+', '_', nombre)
 
-# Guardar archivo de cookies
+# 📌 Guarda cookies si el usuario sube un archivo
 def guardar_cookies_archivo(cookies_file):
     if cookies_file is not None:
         temp_dir = tempfile.gettempdir()
@@ -20,149 +19,99 @@ def guardar_cookies_archivo(cookies_file):
         return cookies_path
     return None
 
-# Descargar video MP4 con barra de progreso
+# 📌 Obtener configuración según calidad
+def opciones_por_calidad(calidad, cookies_path=None):
+    opciones = {'outtmpl': 'temp_video.%(ext)s', 'quiet': True, 'no_warnings': True}
+    if cookies_path:
+        opciones['cookiesfromfile'] = cookies_path
+
+    if calidad == "alta":
+        opciones['format'] = 'bestvideo+bestaudio/best'
+    elif calidad == "normal":
+        opciones['format'] = 'bv[height<=480]+ba/b[height<=480]'
+    elif calidad == "baja":
+        opciones['format'] = 'worstvideo+worstaudio/worst'
+    else:
+        opciones['format'] = 'best'
+    return opciones
+
+# 📌 Descargar MP4
 def descargar_mp4(url, calidad, cookies_path=None):
     try:
-        archivo_temporal = "temp_video"
-
-        if calidad == "alta":
-            formato = 'bestvideo+bestaudio/best'
-        elif calidad == "normal":
-            formato = 'bv[height<=480]+ba/b[height<=480]'
-        elif calidad == "baja":
-            formato = 'worstvideo+worstaudio/worst'
-        else:
-            st.error("Calidad no válida.")
-            return None
-
-        opciones = {
-            'format': formato,
-            'outtmpl': f'{archivo_temporal}.%(ext)s',
-            'headers': {
-                'User-Agent': 'Mozilla/5.0'
-            }
-        }
-
-        if cookies_path:
-            opciones['cookiefile'] = cookies_path
-
-        progreso = st.progress(0, text="🔄 Iniciando descarga...")
+        st.info(f"🎬 Descargando video en calidad **{calidad.upper()}**...")
+        opciones = opciones_por_calidad(calidad, cookies_path)
 
         with yt_dlp.YoutubeDL(opciones) as ydl:
             info = ydl.extract_info(url, download=True)
             nombre_original = ydl.prepare_filename(info)
-            titulo_video = limpiar_nombre(info.get('title', 'video'))
+            titulo_video = limpiar_nombre(info.get("title", "video"))
             nombre_salida = f"{titulo_video}.mp4"
 
-            # Simula progreso
-            for i in range(100):
-                progreso.progress(i + 1)
-
-        # Convertir video con ffmpeg
-        subprocess.run([
-            "ffmpeg", "-i", nombre_original,
-            "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental",
-            "-preset", "ultrafast", "-crf", "26",
+        # Convertir a H.264 MP4
+        comando_ffmpeg = [
+            "ffmpeg", "-y", "-i", nombre_original,
+            "-c:v", "libx264", "-c:a", "aac", "-preset", "ultrafast",
             nombre_salida
-        ])
+        ]
+        subprocess.run(comando_ffmpeg, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         os.remove(nombre_original)
-        st.success("✅ Video descargado y convertido con éxito")
 
+        st.success("✅ Video descargado y convertido con éxito.")
         with open(nombre_salida, "rb") as f:
-            st.download_button(
-                label="⬇️ Descargar MP4",
-                data=f,
-                file_name=nombre_salida,
-                mime="video/mp4"
-            )
+            st.download_button("⬇️ Descargar MP4", f, file_name=nombre_salida, mime="video/mp4")
         os.remove(nombre_salida)
 
     except Exception as e:
-        st.error(f"Error al descargar MP4: {e}")
+        st.error(f"❌ Error: {e}")
 
-# Descargar MP3 con barra de progreso en paralelo
-def descargar_mp3(links, cookies_path=None):
-    def descargar_individual(link):
-        try:
-            opciones = {
-                'format': 'bestaudio/best',
-                'outtmpl': '%(title)s.%(ext)s',
-                'noplaylist': True,
-                'quiet': True,
-                'no_warnings': True,
-                'retries': 3,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '0',
-                }],
-            }
-            if cookies_path:
-                opciones['cookiefile'] = cookies_path
+# 📌 Descargar MP3
+def descargar_mp3(url, cookies_path=None):
+    try:
+        st.info("🎧 Descargando audio...")
+        opciones = {'format': 'bestaudio/best', 'outtmpl': 'temp_audio.%(ext)s', 'quiet': True}
+        if cookies_path:
+            opciones['cookiesfromfile'] = cookies_path
 
-            with yt_dlp.YoutubeDL(opciones) as ydl:
-                info = ydl.extract_info(link, download=True)
-                titulo = limpiar_nombre(info.get('title', 'audio'))
-                nombre = f"{titulo}.mp3"
-                return nombre
-        except Exception as e:
-            return f"error::{link}::{e}"
+        with yt_dlp.YoutubeDL(opciones) as ydl:
+            info = ydl.extract_info(url, download=True)
+            nombre_original = ydl.prepare_filename(info)
+            titulo_audio = limpiar_nombre(info.get("title", "audio"))
+            nombre_salida = f"{titulo_audio}.mp3"
 
-    resultados = []
-    progreso = st.progress(0, text="🔄 Iniciando descarga de MP3...")
+        subprocess.run([
+            "ffmpeg", "-y", "-i", nombre_original,
+            "-vn", "-ab", "192k", "-ar", "44100", "-f", "mp3",
+            nombre_salida
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(descargar_individual, link) for link in links]
-        completados = 0
-        total = len(futures)
+        os.remove(nombre_original)
 
-        for future in concurrent.futures.as_completed(futures):
-            resultados.append(future.result())
-            completados += 1
-            progreso.progress(completados / total)
+        st.success("✅ Audio descargado con éxito.")
+        with open(nombre_salida, "rb") as f:
+            st.download_button("⬇️ Descargar MP3", f, file_name=nombre_salida, mime="audio/mpeg")
+        os.remove(nombre_salida)
 
-    for resultado in resultados:
-        if resultado.startswith("error::"):
-            _, link_fallido, mensaje = resultado.split("::", 2)
-            st.error(f"❌ Error al descargar {link_fallido}: {mensaje}")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+
+# 📌 Interfaz Streamlit
+st.title("📥 Descargador de YouTube (MP4 y MP3 mejorado)")
+url = st.text_input("🎯 Pega la URL del video:")
+opcion = st.radio("Selecciona formato:", ["MP4", "MP3"])
+cookies_file = st.file_uploader("Subir cookies.txt (opcional)", type=["txt"])
+
+if opcion == "MP4":
+    calidad = st.selectbox("Elige la calidad:", ["alta", "normal", "baja"])
+else:
+    calidad = None
+
+if st.button("Descargar"):
+    if url.strip():
+        cookies_path = guardar_cookies_archivo(cookies_file)
+        if opcion == "MP4":
+            descargar_mp4(url, calidad, cookies_path)
         else:
-            with open(resultado, "rb") as f:
-                st.download_button(
-                    label=f"⬇️ Descargar MP3: {os.path.basename(resultado)}",
-                    data=f,
-                    file_name=os.path.basename(resultado),
-                    mime="audio/mpeg"
-                )
-            os.remove(resultado)
-
-    st.success("✅ Descargas completadas")
-
-# Interfaz principal
-def main():
-    st.title("Descargador de YouTube: MP4 y MP3")
-
-    tipo_archivo = st.selectbox("Selecciona el tipo de archivo", ["MP4", "MP3"])
-    cookies_file = st.file_uploader("Sube tu archivo de cookies (cookies.txt)", type=["txt"])
-    cookies_path = guardar_cookies_archivo(cookies_file)
-
-    if tipo_archivo == "MP4":
-        url = st.text_input("Ingresa el enlace del video (MP4)")
-        calidad = st.selectbox("Selecciona la calidad del video", ["alta", "normal", "baja"])
-        if st.button("Descargar MP4"):
-            if url:
-                descargar_mp4(url, calidad, cookies_path)
-            else:
-                st.warning("Por favor ingresa un enlace válido.")
-
-    elif tipo_archivo == "MP3":
-        enlaces = st.text_area("Ingresa hasta 10 enlaces (uno por línea)")
-        if st.button("Descargar MP3"):
-            links = [link.strip() for link in enlaces.strip().splitlines() if link.strip()]
-            if links and len(links) <= 10:
-                descargar_mp3(links, cookies_path)
-            else:
-                st.warning("Ingresa entre 1 y 10 enlaces válidos.")
-
-if __name__ == "__main__":
-    main()
+            descargar_mp3(url, cookies_path)
+    else:
+        st.warning("⚠️ Por favor ingresa una URL válida.")
